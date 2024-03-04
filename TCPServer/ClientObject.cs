@@ -11,13 +11,14 @@ namespace TCPServer
 {
     public class ClientObject
     {
-        public TcpClient client;
-        public static List<TcpClient> clients = new List<TcpClient>();
+        private Socket clientSocket;
+        private static List<Socket> clients = new List<Socket>();
         private static List<NetworkStream> streams = new List<NetworkStream>();
-        public ClientObject(TcpClient tcpClient)
+
+        public ClientObject(Socket socket)
         {
-            client = tcpClient;
-            clients.Add(client);
+            clientSocket = socket;
+            clients.Add(clientSocket);
         }
 
         public void Process()
@@ -25,62 +26,57 @@ namespace TCPServer
             NetworkStream stream = null;
             try
             {
-                stream = client.GetStream();
+                stream = new NetworkStream(clientSocket);
                 streams.Add(stream);
                 GetFile(stream);
                 byte[] buffer = new byte[4096];
                 while (true)
                 {
-                    
-
-                    int size = 0;
-                    StringBuilder data = new StringBuilder();
-
-                    do
+                    int bytesRead = stream.Read(buffer, 0, buffer.Length);
+                    if (bytesRead == 0)
                     {
-                        size = stream.Read(buffer,0,4096);
-                        data.Append(Encoding.UTF8.GetString(buffer,0,size));
-
-                    } while (client.Available > 0);
-                                          
-                    Console.WriteLine(data);
-
-                    foreach (var _stream in streams)
-                    {
-                        _stream.Write(Encoding.UTF8.GetBytes(data.ToString()));       
+                        break;
                     }
 
+                    string data = Encoding.UTF8.GetString(buffer, 0, bytesRead);
+                    Console.WriteLine(data);
+
+                    foreach (var clientStream in streams)
+                    {
+                        clientStream.Write(Encoding.UTF8.GetBytes(data), 0, bytesRead);
+                    }
                 }
-               
-            }catch(Exception e)
+            }
+            catch (Exception e)
             {
                 Console.WriteLine(e.Message);
             }
             finally
             {
-                if (stream != null)
-                    stream.Close();
-                if (client != null)
-                    client.Close();
+                stream?.Close();
+                clientSocket?.Close();
+                streams.Remove(stream);
+                clients.Remove(clientSocket);
             }
         }
 
-        public async Task GetFile(NetworkStream stream)//TODO:Разобрать работы отправки и приёма файла, доработать
+        public async Task GetFile(NetworkStream stream)
         {
-            byte[] buf = new byte[65536];
-            await ReadBytes(sizeof(long),stream,buf);
+            byte[] buf = new byte[sizeof(long)];
+            await ReadBytes(buf.Length, stream, buf);
             long remainingLength = IPAddress.NetworkToHostOrder(BitConverter.ToInt64(buf, 0));
+
             using var file = File.Create("test.txt");
             while (remainingLength > 0)
             {
                 int lengthToRead = (int)Math.Min(remainingLength, buf.Length);
-                await ReadBytes(lengthToRead,stream,buf);
+                await ReadBytes(lengthToRead, stream, buf);
                 await file.WriteAsync(buf, 0, lengthToRead);
                 remainingLength -= lengthToRead;
             }
         }
 
-        private async Task ReadBytes(int howmuch,NetworkStream stream, byte[] buf)
+        private async Task ReadBytes(int howmuch, NetworkStream stream, byte[] buf)
         {
             int readPos = 0;
             while (readPos < howmuch)

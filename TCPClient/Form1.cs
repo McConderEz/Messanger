@@ -9,15 +9,14 @@ namespace TCPClient
 {
     public partial class Form1 : Form
     {
-        TcpClient client;
-        List<TcpClient> clients;
-        NetworkStream stream;
+        private Socket clientSocket;
+        private List<Socket> clients;
+        private NetworkStream stream;
+
         public Form1()
         {
             InitializeComponent();
-
         }
-
 
         private void Form1_Load(object sender, EventArgs e)
         {
@@ -25,10 +24,11 @@ namespace TCPClient
             button2.Enabled = false;
         }
 
-        private void SendMessage_Click(object sender, EventArgs e)
+        private async void SendMessage_Click(object sender, EventArgs e)
         {
-            string message = $"[{DateTime.Now}]{textBox3.Text}:"+textBox4.Text;
-            stream.Write(Encoding.UTF8.GetBytes(message));
+            string message = $" [{DateTime.Now}]{textBox3.Text}: {textBox4.Text}";
+            byte[] messageBytes = Encoding.UTF8.GetBytes(message);
+            await stream.WriteAsync(messageBytes, 0, messageBytes.Length);
             textBox4.Text = "";
         }
 
@@ -38,12 +38,16 @@ namespace TCPClient
         }
 
         private void GetListOfUsers()
-        {            
-            while (client.Connected)
+        {
+            while (clientSocket.Connected)
             {
-                if (treeUsers.Nodes[treeUsers.Nodes.Count - 1].Text != ClientObject.clients.LastOrDefault().ToString()) 
+                if (treeUsers.Nodes[treeUsers.Nodes.Count - 1].Text !=
+                    clients[clients.Count - 1].RemoteEndPoint.ToString())
                 {
-                    treeUsers.Nodes.Add(ClientObject.clients.LastOrDefault().ToString());
+                    Invoke((MethodInvoker)(() =>
+                    {
+                        treeUsers.Nodes.Add(clients[clients.Count - 1].RemoteEndPoint.ToString());
+                    }));
                 }
             }
         }
@@ -55,62 +59,48 @@ namespace TCPClient
 
         public void GetMessage()
         {
-            while (client.Connected)
+            while (clientSocket.Connected)
             {
                 byte[] buffer = new byte[4096];
-                int size = 0;
-                StringBuilder data = new StringBuilder();
-                do
+                int bytesRead = stream.Read(buffer, 0, buffer.Length);
+                if (bytesRead > 0)
                 {
-                    size = stream.Read(buffer, 0, 4096);
-                    data.Append(Encoding.UTF8.GetString(buffer, 0, size));
-
-                } while (client.Available > 0);
-                if (data != null)
-                    MessageWindow.AppendText(data + "\r\n");
-                data = null;
+                    string data = Encoding.UTF8.GetString(buffer, 0, bytesRead);
+                    Invoke((MethodInvoker)(() =>
+                    {
+                        MessageWindow.AppendText(data + "\r\n");
+                    }));
+                }
             }
         }
 
-        private void MessageWindow_TextChanged(object sender, EventArgs e)
-        {
-
-        }
-
-        private void textBox4_TextChanged(object sender, EventArgs e)
-        {
-
-        }
-
-        private void button1_Click(object sender, EventArgs e)//Подключение
+        private void button1_Click(object sender, EventArgs e) // Подключение
         {
             try
             {
-                client = new TcpClient();
-                client.Connect(IPAddress.Parse(textBox1.Text), int.Parse(textBox2.Text));
-                stream = client.GetStream();
+                clientSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+                clientSocket.Connect(IPAddress.Parse(textBox1.Text), int.Parse(textBox2.Text));
+                stream = new NetworkStream(clientSocket);
                 button1.Enabled = false;
                 button2.Enabled = true;
                 GetMessageAsync();
-                
-                //TODO: Сделать список пользователей
-                //TODO:Вынести в отдельный класс и сделать атрибут UserName для отображении его в списке подключенных пользователей
-                //TODO: Передача файлов
 
+                // TODO: Сделать список пользователей
+                // TODO: Вынести в отдельный класс и сделать атрибут UserName для отображения его в списке подключенных пользователей
+                // TODO: Передача файлов
             }
-            catch(Exception ex) 
+            catch (Exception ex)
             {
-
+                MessageBox.Show(ex.Message);
             }
-
         }
 
         private void button2_Click(object sender, EventArgs e)
         {
-            if (client.Connected)
-            { 
+            if (clientSocket.Connected)
+            {
                 stream.Close();
-                client.Close();
+                clientSocket.Close();
                 button1.Enabled = true;
                 button2.Enabled = false;
             }
@@ -118,7 +108,7 @@ namespace TCPClient
 
         private void SendFile_Click(object sender, EventArgs e)
         {
-            if(client.Connected)
+            if (clientSocket.Connected)
             {
                 OpenFileDialogSend.ShowDialog();
                 Task.Run(() => SendFileAsync(OpenFileDialogSend.FileName));
@@ -127,12 +117,13 @@ namespace TCPClient
 
         private async Task SendFileAsync(string fileName)
         {
-            var stream = client.GetStream();
-            using var file = File.OpenRead(fileName);
-            var length = file.Length;
-            byte[] lengthBytes = BitConverter.GetBytes(IPAddress.HostToNetworkOrder(length));
-            await stream.WriteAsync(lengthBytes);
-            await file.CopyToAsync(stream);
+            using (var fileStream = File.OpenRead(fileName))
+            {
+                long length = fileStream.Length;
+                byte[] lengthBytes = BitConverter.GetBytes(IPAddress.HostToNetworkOrder(length));
+                await stream.WriteAsync(lengthBytes, 0, lengthBytes.Length);
+                await fileStream.CopyToAsync(stream);
+            }
         }
     }
 }
