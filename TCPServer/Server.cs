@@ -15,23 +15,26 @@ namespace TCPServer
         
         public string Ip { get; private set; }
         public int Port { get; private set; }
-        static TcpListener listener;
+        static Socket socket;
         public Server(string Name)
         {
             Ip = "127.0.0.1";
             Port = 8081;
-            listener = new TcpListener(IPAddress.Parse(Ip), Port);         
+            IPEndPoint ipPoint = new IPEndPoint(IPAddress.Any, Port);
+            socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream,ProtocolType.Tcp); 
+            socket.Bind(ipPoint);
+            socket.Listen(10);
         }
 
         public void Process()
         {
-            listener.Start();
             Console.WriteLine("Ожидание подключений...");
+
             while (true)
             {
-                TcpClient client = listener.AcceptTcpClient();
+                Socket client = socket.Accept();
                 ClientObject clientObject = new ClientObject(client);
-                
+
 
                 Thread clientThread = new Thread(new ThreadStart(clientObject.Process));
                 clientThread.Start();
